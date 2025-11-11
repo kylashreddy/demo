@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Opinion Mining Based Fake Product Review Monitoring and Removal System">
+    <meta name="keywords" content="fake review detection, opinion mining, sentiment analysis, NLP">
+    <title>Fake Review Detection System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🔍 Opinion Mining Based Fake Review Detection</h1>
+            <p>AI-Powered Review Analysis and Monitoring System</p>
+        </div>
+
+        <!-- Notification -->
+        <div id="notification" class="notification"></div>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div>
+                    <div class="stat-label">Total Reviews</div>
+                    <div class="stat-number" id="totalReviews">0</div>
+                </div>
+                <div class="stat-icon">📊</div>
+            </div>
+            <div class="stat-card genuine">
+                <div>
+                    <div class="stat-label">Genuine</div>
+                    <div class="stat-number" id="genuineReviews">0</div>
+                </div>
+                <div class="stat-icon">✓</div>
+            </div>
+            <div class="stat-card fake">
+                <div>
+                    <div class="stat-label">Fake</div>
+                    <div class="stat-number" id="fakeReviews">0</div>
+                </div>
+                <div class="stat-icon">✗</div>
+            </div>
+            <div class="stat-card suspicious">
+                <div>
+                    <div class="stat-label">Suspicious</div>
+                    <div class="stat-number" id="suspiciousReviews">0</div>
+                </div>
+                <div class="stat-icon">⚠</div>
+            </div>
+        </div>
+
+        <!-- Main Panel -->
+        <div class="main-panel">
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab active" data-tab="dashboard">Dashboard</button>
+                <button class="tab" data-tab="upload">Add Reviews</button>
+                <button class="tab" data-tab="analysis">Analysis</button>
+            </div>
+
+            <!-- Dashboard Tab -->
+            <div id="dashboard" class="tab-content active">
+                <div class="controls">
+                    <input type="text" id="searchInput" placeholder="🔍 Search reviews...">
+                    <select id="productFilter">
+                        <option value="all">All Products</option>
+                    </select>
+                    <button id="exportBtn" class="btn btn-success">📥 Export CSV</button>
+                    <button id="removeAllFakeBtn" class="btn btn-danger">🗑️ Remove All Fake</button>
+                </div>
+                <div class="review-list" id="reviewList">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📋</div>
+                        <h3>No reviews yet</h3>
+                        <p>Upload or add reviews to get started</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upload Tab -->
+            <div id="upload" class="tab-content">
+                <div class="upload-section">
+                    <!-- File Upload -->
+                    <div class="upload-box">
+                        <div style="font-size: 60px; margin-bottom: 20px;">📁</div>
+                        <h3>Upload Review File</h3>
+                        <p style="color: #666; margin: 15px 0;">CSV or JSON format</p>
+                        <input type="file" id="fileInput" accept=".csv,.json" style="display: none;">
+                        <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                            Choose File
+                        </button>
+                        <p style="font-size: 0.85em; color: #999; margin-top: 15px;">
+                            CSV Format: Product,Reviewer,Rating,Review Text
+                        </p>
+                    </div>
+
+                    <!-- Manual Entry -->
+                    <div style="border: 2px solid #ddd; border-radius: 15px; padding: 30px;">
+                        <h3 style="margin-bottom: 20px;">Add Single Review</h3>
+                        <div class="form-group">
+                            <label>Product Name</label>
+                            <input type="text" id="productName" placeholder="Enter product name">
+                        </div>
+                        <div class="form-group">
+                            <label>Reviewer Name</label>
+                            <input type="text" id="reviewerName" placeholder="Enter reviewer name">
+                        </div>
+                        <div class="form-group">
+                            <label>Rating</label>
+                            <select id="rating">
+                                <option value="">Select Rating</option>
+                                <option value="1">1 Star</option>
+                                <option value="2">2 Stars</option>
+                                <option value="3">3 Stars</option>
+                                <option value="4">4 Stars</option>
+                                <option value="5">5 Stars</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Review Text</label>
+                            <textarea id="reviewText" rows="4" placeholder="Enter review text..."></textarea>
+                        </div>
+                        <button id="analyzeBtn" class="btn btn-primary" style="width: 100%;">
+                            🔍 Analyze Review
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analysis Tab -->
+            <div id="analysis" class="tab-content">
+                <div class="stats-grid">
+                    <div class="stat-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                        <div>
+                            <div class="stat-label">Detection Accuracy</div>
+                            <div class="stat-number" id="accuracy">0%</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white;">
+                        <div>
+                            <div class="stat-label">Fake Review Rate</div>
+                            <div class="stat-number" id="fakeRate">0%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background: #f9f9f9; padding: 30px; border-radius: 15px; margin-top: 20px;">
+                    <h3 style="margin-bottom: 20px;">Detection Features</h3>
+                    <div class="analysis-grid">
+                        <div class="analysis-card">
+                            <h4>✓ Pattern Analysis</h4>
+                            <ul>
+                                <li>• Generic phrase detection</li>
+                                <li>• Excessive punctuation analysis</li>
+                                <li>• Capitalization patterns</li>
+                                <li>• Review length validation</li>
+                            </ul>
+                        </div>
+                        <div class="analysis-card">
+                            <h4>✓ Sentiment Analysis</h4>
+                            <ul>
+                                <li>• Rating-text correlation</li>
+                                <li>• Positive/negative word ratio</li>
+                                <li>• Emotional authenticity (TextBlob)</li>
+                                <li>• Context consistency checking</li>
+                            </ul>
+                        </div>
+                        <div class="analysis-card">
+                            <h4>✓ Spam Detection</h4>
+                            <ul>
+                                <li>• URL and link detection</li>
+                                <li>• Promotional content identification</li>
+                                <li>• Repeated character patterns</li>
+                                <li>• Suspicious keyword flagging</li>
+                            </ul>
+                        </div>
+                        <div class="analysis-card">
+                            <h4>✓ Quality Metrics</h4>
+                            <ul>
+                                <li>• Confidence scoring (50-99%)</li>
+                                <li>• Feature importance weighting</li>
+                                <li>• Real-time ML analysis</li>
+                                <li>• Detailed reporting</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 30px; padding: 20px; background: white; border-radius: 12px;">
+                        <h4 style="margin-bottom: 15px;">🤖 AI Techniques Used</h4>
+                        <ul style="list-style: none; padding: 0;">
+                            <li style="padding: 8px 0; color: #666;">
+                                <strong>Natural Language Processing (NLP):</strong> NLTK tokenization and processing
+                            </li>
+                            <li style="padding: 8px 0; color: #666;">
+                                <strong>Sentiment Analysis:</strong> TextBlob polarity and subjectivity analysis
+                            </li>
+                            <li style="padding: 8px 0; color: #666;">
+                                <strong>Opinion Mining:</strong> Feature extraction and pattern recognition
+                            </li>
+                            <li style="padding: 8px 0; color: #666;">
+                                <strong>Statistical Analysis:</strong> Word frequency and diversity metrics
+                            </li>
+                            <li style="padding: 8px 0; color: #666;">
+                                <strong>Rule-Based Classification:</strong> Multi-feature scoring system
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
