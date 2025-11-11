@@ -77,54 +77,11 @@ class FakeReviewDetector:
 reviews_storage = []
 
 def handler(event, context):
-    """Vercel serverless function handler"""
-    try:
-        # Parse the incoming request
-        if 'body' in event and event['body']:
-            if isinstance(event['body'], str):
-                try:
-                    body = json.loads(event['body'])
-                except:
-                    body = {}
-            else:
-                body = event['body']
-        else:
-            body = {}
-
-        method = event.get('httpMethod', event.get('method', 'GET'))
-        path = event.get('path', '/')
-
-        # Remove query parameters from path
-        path = path.split('?')[0]
-
-        # Route handling
-        if path == '/api/analyze' and method == 'POST':
-            return handle_analyze(body)
-        elif path == '/api/reviews' and method == 'GET':
-            return handle_get_reviews(event.get('queryStringParameters', {}))
-        elif path == '/api/statistics' and method == 'GET':
-            return handle_statistics()
-        elif path == '/api/clear' and method == 'POST':
-            return handle_clear()
-        else:
-            return {
-                'statusCode': 404,
-                'headers': {'Content-Type': 'application/json'},
-                'body': json.dumps({
-                    'success': False,
-                    'error': 'Endpoint not found'
-                })
-            }
-
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({
-                'success': False,
-                'error': str(e)
-            })
-        }
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps(event)
+    }
 
 
 def handle_analyze(data):
