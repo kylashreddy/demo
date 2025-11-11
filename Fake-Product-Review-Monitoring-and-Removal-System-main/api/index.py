@@ -1,20 +1,14 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
 from datetime import datetime
-from model import FakeReviewDetector, analyze_batch_reviews, get_statistics
+from model import FakeReviewDetector
 
 app = Flask(__name__)
 CORS(app)
 
 # In-memory storage for reviews (in production, use a database)
 reviews_storage = []
-
-
-@app.route('/')
-def index():
-    """Render the main page"""
-    return render_template('index.html')
 
 
 @app.route('/api/analyze', methods=['POST'])
@@ -74,63 +68,6 @@ def analyze_review():
         }), 500
 
 
-@app.route('/api/analyze-batch', methods=['POST'])
-def analyze_batch():
-    """
-    Analyze multiple reviews at once
-
-    Expected JSON format:
-    {
-        "reviews": [
-            {
-                "product": "Product Name",
-                "reviewer": "Reviewer Name",
-                "rating": 5,
-                "text": "Review text"
-            },
-            ...
-        ]
-    }
-    """
-    try:
-        data = request.get_json()
-
-        if not data or 'reviews' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'Missing reviews array'
-            }), 400
-
-        reviews = data['reviews']
-
-        if not isinstance(reviews, list) or len(reviews) == 0:
-            return jsonify({
-                'success': False,
-                'error': 'Reviews must be a non-empty array'
-            }), 400
-
-        # Analyze all reviews
-        analyzed_reviews = analyze_batch_reviews(reviews)
-
-        # Store all analyzed reviews
-        for review in analyzed_reviews:
-            review['id'] = len(reviews_storage) + 1
-            review['timestamp'] = datetime.now().isoformat()
-            reviews_storage.append(review)
-
-        return jsonify({
-            'success': True,
-            'count': len(analyzed_reviews),
-            'reviews': analyzed_reviews
-        })
-
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
 @app.route('/api/reviews', methods=['GET'])
 def get_reviews():
     """Get all stored reviews"""
@@ -162,63 +99,25 @@ def get_reviews():
         }), 500
 
 
-@app.route('/api/reviews/<int:review_id>', methods=['DELETE'])
-def delete_review(review_id):
-    """Delete a specific review"""
-    try:
-        global reviews_storage
-
-        # Find and remove the review
-        reviews_storage = [r for r in reviews_storage if r['id'] != review_id]
-
-        return jsonify({
-            'success': True,
-            'message': 'Review deleted successfully'
-        })
-
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@app.route('/api/reviews/bulk-delete', methods=['POST'])
-def bulk_delete():
-    """Delete multiple reviews based on prediction type"""
-    try:
-        data = request.get_json()
-        prediction_type = data.get('prediction', 'fake')
-
-        global reviews_storage
-
-        # Count reviews to be deleted
-        before_count = len(reviews_storage)
-
-        # Remove reviews matching the prediction type
-        reviews_storage = [r for r in reviews_storage if r['prediction'] != prediction_type]
-
-        after_count = len(reviews_storage)
-        deleted_count = before_count - after_count
-
-        return jsonify({
-            'success': True,
-            'deleted_count': deleted_count,
-            'message': f'Deleted {deleted_count} {prediction_type} reviews'
-        })
-
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
 @app.route('/api/statistics', methods=['GET'])
 def get_stats():
     """Get statistics about stored reviews"""
     try:
-        stats = get_statistics(reviews_storage)
+        # Calculate basic statistics
+        total_reviews = len(reviews_storage)
+        fake_count = sum(1 for r in reviews_storage if r['prediction'] == 'fake')
+        genuine_count = sum(1 for r in reviews_storage if r['prediction'] == 'genuine')
+        suspicious_count = sum(1 for r in reviews_storage if r['prediction'] == 'suspicious')
+
+        stats = {
+            'total_reviews': total_reviews,
+            'fake_reviews': fake_count,
+            'genuine_reviews': genuine_count,
+            'suspicious_reviews': suspicious_count,
+            'fake_percentage': round((fake_count / total_reviews * 100) if total_reviews > 0 else 0, 1),
+            'genuine_percentage': round((genuine_count / total_reviews * 100) if total_reviews > 0 else 0, 1),
+            'suspicious_percentage': round((suspicious_count / total_reviews * 100) if total_reviews > 0 else 0, 1)
+        }
 
         # Get product list
         products = list(set(r['product'] for r in reviews_storage))
@@ -274,26 +173,74 @@ def internal_error(error):
     }), 500
 
 
-# Vercel expects a function named 'app' for serverless functions
-# This is the entry point for Vercel
+# Vercel serverless function handler
 def handler(event, context):
-    # For Vercel, we need to handle the request differently
-    # This is a basic handler that delegates to Flask
-    from werkzeug.wrappers import Request
-    from werkzeug.serving import make_server
+    """Vercel serverless function handler"""
+    try:
+        from werkzeug.wrappers import Request
+        from werkzeug.test import EnvironBuilder
 
-    # Create a WSGI application
-    wsgi_app = app.wsgi_app
+        # Build WSGI environment from Vercel event
+        if 'requestContext' in event:  # API Gateway format
+            method = event.get('httpMethod', 'GET')
+            path = event.get('path', '/')
+            headers = event.get('headers', {})
+            body = event.get('body', '')
+            query_params = event.get('queryStringParameters', {}) or {}
+        else:  # Vercel format
+            method = event.get('method', 'GET')
+            path = event.get('path', '/')
+            headers = event.get('headers', {})
+            body = event.get('body', '')
+            query_params = event.get('query', {}) or {}
 
-    # Handle the request
-    request = Request(event)
-    response = wsgi_app(request.environ, lambda s, h: None)
+        # Build query string
+        query_string = '&'.join([f"{k}={v}" for k, v in query_params.items()])
 
-    return {
-        'statusCode': response.status_code,
-        'headers': dict(response.headers),
-        'body': response.get_data(as_text=True)
-    }
+        # Create WSGI environment
+        builder = EnvironBuilder(
+            method=method,
+            path=path,
+            query_string=query_string,
+            headers=headers,
+            data=body if body else None
+        )
+        env = builder.get_environ()
+
+        # Create response collector
+        response_data = []
+
+        def start_response(status, response_headers, exc_info=None):
+            response_data.append((status, response_headers))
+
+        # Call WSGI app
+        result = app.wsgi_app(env, start_response)
+
+        # Get response
+        status, headers = response_data[0]
+        response_body = b''.join(result).decode('utf-8')
+
+        # Parse status code
+        status_code = int(status.split()[0])
+
+        # Convert headers to dict
+        response_headers = {k: v for k, v in headers}
+
+        return {
+            'statusCode': status_code,
+            'headers': response_headers,
+            'body': response_body
+        }
+
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'success': False,
+                'error': str(e)
+            })
+        }
 
 
 if __name__ == '__main__':
