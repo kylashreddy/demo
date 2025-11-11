@@ -1,46 +1,148 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
 import json
 from datetime import datetime
-from model import FakeReviewDetector
 
-app = Flask(__name__)
-CORS(app)
+# Simple fake review detector (embedded to avoid import issues)
+class FakeReviewDetector:
+    def __init__(self):
+        self.generic_phrases = [
+            'best product ever', 'highly recommend', 'amazing product',
+            'must buy', 'life changing', 'perfect', 'awesome',
+            'excellent', 'worst ever', 'terrible product', 'waste of money',
+            'don\'t buy', 'save your money', 'total scam'
+        ]
 
-# In-memory storage for reviews (in production, use a database)
+        self.positive_words = [
+            'good', 'great', 'excellent', 'love', 'best', 'amazing',
+            'wonderful', 'fantastic', 'perfect', 'awesome', 'outstanding'
+        ]
+
+        self.negative_words = [
+            'bad', 'poor', 'terrible', 'worst', 'hate', 'disappointed',
+            'awful', 'horrible', 'useless', 'waste', 'regret'
+        ]
+
+    def analyze_review(self, review_text, rating):
+        score = 0
+        features = {
+            'suspicious_patterns': [],
+            'positive_indicators': [],
+            'warnings': []
+        }
+
+        # Simple analysis
+        text_lower = review_text.lower()
+
+        # Check for generic phrases
+        found_phrases = [phrase for phrase in self.generic_phrases if phrase in text_lower]
+        if len(found_phrases) > 1:
+            features['suspicious_patterns'].append('Multiple generic phrases')
+            score += 25
+
+        # Check sentiment vs rating
+        pos_count = sum(1 for word in self.positive_words if word in text_lower)
+        neg_count = sum(1 for word in self.negative_words if word in text_lower)
+
+        if rating >= 4 and neg_count > pos_count:
+            features['suspicious_patterns'].append('Rating-content mismatch')
+            score += 35
+        elif rating <= 2 and pos_count > neg_count:
+            features['suspicious_patterns'].append('Rating-content mismatch')
+            score += 35
+
+        # Length check
+        if len(review_text) < 20:
+            features['suspicious_patterns'].append('Very short review')
+            score += 30
+
+        # Determine prediction
+        if score >= 60:
+            prediction = 'fake'
+            confidence = 85
+        elif score >= 30:
+            prediction = 'suspicious'
+            confidence = 65
+        else:
+            prediction = 'genuine'
+            confidence = 80
+
+        return {
+            'prediction': prediction,
+            'confidence': confidence,
+            'score': score,
+            'features': features
+        }
+
+
+# Vercel serverless function
 reviews_storage = []
 
-
-@app.route('/api/analyze', methods=['POST'])
-def analyze_review():
-    """
-    Analyze a single review
-
-    Expected JSON format:
-    {
-        "product": "Product Name",
-        "reviewer": "Reviewer Name",
-        "rating": 5,
-        "text": "Review text here"
-    }
-    """
+def handler(event, context):
+    """Vercel serverless function handler"""
     try:
-        data = request.get_json()
+        # Parse the incoming request
+        if 'body' in event and event['body']:
+            if isinstance(event['body'], str):
+                try:
+                    body = json.loads(event['body'])
+                except:
+                    body = {}
+            else:
+                body = event['body']
+        else:
+            body = {}
 
-        # Validate input
-        if not data or 'text' not in data or 'rating' not in data:
-            return jsonify({
+        method = event.get('httpMethod', event.get('method', 'GET'))
+        path = event.get('path', '/')
+
+        # Remove query parameters from path
+        path = path.split('?')[0]
+
+        # Route handling
+        if path == '/api/analyze' and method == 'POST':
+            return handle_analyze(body)
+        elif path == '/api/reviews' and method == 'GET':
+            return handle_get_reviews(event.get('queryStringParameters', {}))
+        elif path == '/api/statistics' and method == 'GET':
+            return handle_statistics()
+        elif path == '/api/clear' and method == 'POST':
+            return handle_clear()
+        else:
+            return {
+                'statusCode': 404,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({
+                    'success': False,
+                    'error': 'Endpoint not found'
+                })
+            }
+
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
                 'success': False,
-                'error': 'Missing required fields: text and rating'
-            }), 400
+                'error': str(e)
+            })
+        }
 
-        # Create detector instance
+
+def handle_analyze(data):
+    """Handle review analysis"""
+    try:
+        if not data or 'text' not in data or 'rating' not in data:
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({
+                    'success': False,
+                    'error': 'Missing required fields: text and rating'
+                })
+            }
+
         detector = FakeReviewDetector()
-
-        # Analyze the review
         analysis = detector.analyze_review(data['text'], int(data['rating']))
 
-        # Create review object
         review = {
             'id': len(reviews_storage) + 1,
             'product': data.get('product', 'Unknown'),
@@ -53,57 +155,66 @@ def analyze_review():
             'timestamp': datetime.now().isoformat()
         }
 
-        # Store the review
         reviews_storage.append(review)
 
-        return jsonify({
-            'success': True,
-            'review': review
-        })
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'success': True,
+                'review': review
+            })
+        }
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'success': False,
+                'error': str(e)
+            })
+        }
 
 
-@app.route('/api/reviews', methods=['GET'])
-def get_reviews():
-    """Get all stored reviews"""
+def handle_get_reviews(query_params):
+    """Handle get reviews"""
     try:
-        # Get query parameters for filtering
-        product = request.args.get('product')
-        prediction = request.args.get('prediction')
+        product = query_params.get('product')
+        prediction = query_params.get('prediction')
 
         filtered_reviews = reviews_storage
 
-        # Filter by product
         if product and product != 'all':
             filtered_reviews = [r for r in filtered_reviews if r['product'] == product]
 
-        # Filter by prediction
         if prediction and prediction != 'all':
             filtered_reviews = [r for r in filtered_reviews if r['prediction'] == prediction]
 
-        return jsonify({
-            'success': True,
-            'count': len(filtered_reviews),
-            'reviews': filtered_reviews
-        })
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'success': True,
+                'count': len(filtered_reviews),
+                'reviews': filtered_reviews
+            })
+        }
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'success': False,
+                'error': str(e)
+            })
+        }
 
 
-@app.route('/api/statistics', methods=['GET'])
-def get_stats():
-    """Get statistics about stored reviews"""
+def handle_statistics():
+    """Handle statistics"""
     try:
-        # Calculate basic statistics
         total_reviews = len(reviews_storage)
         fake_count = sum(1 for r in reviews_storage if r['prediction'] == 'fake')
         genuine_count = sum(1 for r in reviews_storage if r['prediction'] == 'genuine')
@@ -119,117 +230,16 @@ def get_stats():
             'suspicious_percentage': round((suspicious_count / total_reviews * 100) if total_reviews > 0 else 0, 1)
         }
 
-        # Get product list
         products = list(set(r['product'] for r in reviews_storage))
 
-        return jsonify({
-            'success': True,
-            'statistics': stats,
-            'products': products
-        })
-
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@app.route('/api/clear', methods=['POST'])
-def clear_all():
-    """Clear all stored reviews"""
-    try:
-        global reviews_storage
-        count = len(reviews_storage)
-        reviews_storage = []
-
-        return jsonify({
-            'success': True,
-            'message': f'Cleared {count} reviews'
-        })
-
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@app.errorhandler(404)
-def not_found(error):
-    """Handle 404 errors"""
-    return jsonify({
-        'success': False,
-        'error': 'Endpoint not found'
-    }), 404
-
-
-@app.errorhandler(500)
-def internal_error(error):
-    """Handle 500 errors"""
-    return jsonify({
-        'success': False,
-        'error': 'Internal server error'
-    }), 500
-
-
-# Vercel serverless function handler
-def handler(event, context):
-    """Vercel serverless function handler"""
-    try:
-        from werkzeug.wrappers import Request
-        from werkzeug.test import EnvironBuilder
-
-        # Build WSGI environment from Vercel event
-        if 'requestContext' in event:  # API Gateway format
-            method = event.get('httpMethod', 'GET')
-            path = event.get('path', '/')
-            headers = event.get('headers', {})
-            body = event.get('body', '')
-            query_params = event.get('queryStringParameters', {}) or {}
-        else:  # Vercel format
-            method = event.get('method', 'GET')
-            path = event.get('path', '/')
-            headers = event.get('headers', {})
-            body = event.get('body', '')
-            query_params = event.get('query', {}) or {}
-
-        # Build query string
-        query_string = '&'.join([f"{k}={v}" for k, v in query_params.items()])
-
-        # Create WSGI environment
-        builder = EnvironBuilder(
-            method=method,
-            path=path,
-            query_string=query_string,
-            headers=headers,
-            data=body if body else None
-        )
-        env = builder.get_environ()
-
-        # Create response collector
-        response_data = []
-
-        def start_response(status, response_headers, exc_info=None):
-            response_data.append((status, response_headers))
-
-        # Call WSGI app
-        result = app.wsgi_app(env, start_response)
-
-        # Get response
-        status, headers = response_data[0]
-        response_body = b''.join(result).decode('utf-8')
-
-        # Parse status code
-        status_code = int(status.split()[0])
-
-        # Convert headers to dict
-        response_headers = {k: v for k, v in headers}
-
         return {
-            'statusCode': status_code,
-            'headers': response_headers,
-            'body': response_body
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'success': True,
+                'statistics': stats,
+                'products': products
+            })
         }
 
     except Exception as e:
@@ -243,13 +253,27 @@ def handler(event, context):
         }
 
 
-if __name__ == '__main__':
-    import os
-    print("=" * 60)
-    print("🔍 Opinion Mining Based Fake Review Detection System")
-    print("=" * 60)
-    port = int(os.environ.get('PORT', 5000))
-    print(f"Server starting on port {port}")
-    print("Press CTRL+C to quit")
-    print("=" * 60)
-    app.run(debug=False, host='0.0.0.0', port=port)
+def handle_clear():
+    """Handle clear all reviews"""
+    try:
+        count = len(reviews_storage)
+        reviews_storage.clear()
+
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'success': True,
+                'message': f'Cleared {count} reviews'
+            })
+        }
+
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'success': False,
+                'error': str(e)
+            })
+        }
